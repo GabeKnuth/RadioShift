@@ -238,7 +238,7 @@ class FMRadio:
             self.audio_buffer.playback_paused,
             self.rssi_handler,
             self.audio_buffer,
-            message="Live Reset"
+            message="Reset to Live"
         )
 
     def _on_rotary(self, value):
@@ -259,7 +259,7 @@ class FMRadio:
                 self.audio_buffer.playback_paused,
                 self.rssi_handler,
                 self.audio_buffer,
-                message="Live Reset"
+                message="Reset to Live"
             )
 
     def run(self) -> NoReturn:
