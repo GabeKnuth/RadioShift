@@ -106,12 +106,11 @@ class FMRadio:
         """Handle audio streaming and playback."""
         if status:
 
+            # Write incoming audio to buffer
+            self.audio_buffer.write(indata.copy())
 
-        # Write incoming audio to buffer
-        self.audio_buffer.write(indata.copy())
-
-        # Get buffered data for playback
-        buffered_data = self.audio_buffer.read(frames)
+            # Get buffered data for playback
+            buffered_data = self.audio_buffer.read(frames)
         
         # Handle stereo conversion if needed
         if config.INPUT_CHANNELS == 1 and config.OUTPUT_CHANNELS == 2:
@@ -286,14 +285,6 @@ class FMRadio:
 
 
 if __name__ == "__main__":
-    # Set up logging
-
-        filename='fm_radio.log',
-
-        format='%(asctime)s %(levelname)s: %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
     # Create and run radio
     radio = FMRadio()
     radio.run()
