@@ -34,16 +34,16 @@ class FMRadio:
                 bus.i2c_rdwr(read)
                 status = list(read)
                 rssi = (status[3] >> 4) & 0x0F
-
+                logging.info(f"Initial I2C test - RSSI value: {rssi}")
                 bus.close()
-
+                logging.info("I2C bus is ready")
                 break
             except Exception as e:
-
+                logging.warning(f"I2C not ready on attempt {attempt + 1}: {str(e)}")
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                 else:
-
+                    logging.error("Failed to initialize I2C after maximum retries")
                     raise
         
         # Initialize components
@@ -70,12 +70,12 @@ class FMRadio:
         )
         
         # Prime the radio silently
-
+        logging.info("Priming radio")
         self.radio.set_frequency(88.1)
         time.sleep(0.5)
         
         # Now set the real frequency
-
+        logging.info(f"Setting to target frequency {starting_frequency}")
         self.radio.set_frequency(starting_frequency)
         
         # Only now set up the display callback
@@ -105,12 +105,13 @@ class FMRadio:
     def _audio_callback(self, indata, outdata, frames, time_info, status):
         """Handle audio streaming and playback."""
         if status:
+            logging.warning(f"Audio callback status: {status}")
 
-            # Write incoming audio to buffer
-            self.audio_buffer.write(indata.copy())
+        # Write incoming audio to buffer
+        self.audio_buffer.write(indata.copy())
 
-            # Get buffered data for playback
-            buffered_data = self.audio_buffer.read(frames)
+        # Get buffered data for playback
+        buffered_data = self.audio_buffer.read(frames)
         
         # Handle stereo conversion if needed
         if config.INPUT_CHANNELS == 1 and config.OUTPUT_CHANNELS == 2:
@@ -126,7 +127,7 @@ class FMRadio:
         # Original rewind logic
         half_second_frames = int(config.SAMPLE_RATE * 0.5)
         self.audio_buffer.move_backward(half_second_frames)
-
+        logging.info("Moved playback backward by 0.5 seconds")
         
         new_position = self.audio_buffer.get_delayed_time()
 
@@ -145,7 +146,7 @@ class FMRadio:
         # Original forward logic
         half_second_frames = int(config.SAMPLE_RATE * 0.5)
         self.audio_buffer.move_forward(half_second_frames)
-
+        logging.info("Moved playback forward by 0.5 seconds")
         
         new_position = self.audio_buffer.get_delayed_time()
 
@@ -169,7 +170,7 @@ class FMRadio:
             self.audio_buffer.resume()
             state = "resumed"
         
-
+        logging.info(f"Playback {state}")
 
         self.display.update(
             self.radio.get_frequency(),
@@ -182,7 +183,7 @@ class FMRadio:
     def _on_live(self):
         """Handle live button press"""
         self.audio_buffer.reset_to_live()
-
+        logging.info("Playback reset to live")
         self.display.update(
             self.radio.get_frequency(),
             self.audio_buffer.playback_paused,
@@ -202,7 +203,7 @@ class FMRadio:
         # If we were playing from buffer, reset to live
         if is_buffered:
             self.audio_buffer.reset_to_live()
-
+            logging.info("Playback reset to live after frequency change")
             # Update display with reset message
             self.display.update(
                 self.radio.get_frequency(),
@@ -215,7 +216,7 @@ class FMRadio:
     def run(self) -> NoReturn:
         """Main run loop"""
         try:
-
+            logging.info("Starting FM Radio")
             
             time.sleep(0.5)  # Allow PLL to stabilize
             
@@ -251,7 +252,7 @@ class FMRadio:
                 channels=(config.INPUT_CHANNELS, config.OUTPUT_CHANNELS),
                 callback=self._audio_callback
             ):
-
+                logging.info("Audio streaming started")
                 print("FM Radio is running. Press Ctrl+C to exit.")
                 
                 # Main loop with periodic display update for buffer duration while paused
@@ -267,10 +268,10 @@ class FMRadio:
                         )
 
         except KeyboardInterrupt:
-
+            logging.info("Keyboard interrupt received")
             print("\nExiting FM Radio")
         except Exception as e:
-
+            logging.error(f"Unexpected error: {e}")
             print(f"An unexpected error occurred: {e}")
         finally:
             self.cleanup()
@@ -282,9 +283,17 @@ class FMRadio:
         self.rotary_handler.stop()
         self.rssi_handler.stop_monitoring()
         self.display.cleanup()
-
+        logging.info("FM Radio terminated")
 
 if __name__ == "__main__":
+    # Set up logging
+    logging.basicConfig(
+        filename='fm_radio.log',
+        level=logging.DEBUG,
+        format='%(asctime)s %(levelname)s: %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
     # Create and run radio
     radio = FMRadio()
     radio.run()

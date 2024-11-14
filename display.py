@@ -43,7 +43,7 @@ class Display:
             try:
                 fonts[name] = ImageFont.truetype(self.config.FONT_PATH, size)
             except IOError:
-
+                logging.warning(f"Failed to load {name} font, using default")
                 fonts[name] = ImageFont.load_default()
         return fonts
 

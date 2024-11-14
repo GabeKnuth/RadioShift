@@ -81,11 +81,11 @@ class RotaryHandler:
         try:
             rotary_device_path = self.find_device('rotary')
             if not rotary_device_path:
-
+                logging.error("Rotary encoder device not found")
                 return
 
             rotary_device = evdev.InputDevice(rotary_device_path)
-
+            logging.info(f"Monitoring rotary encoder on {rotary_device.path}")
 
             for event in rotary_device.read_loop():
                 if not self.running:
@@ -95,7 +95,7 @@ class RotaryHandler:
                         self.callback(event.value)
 
         except Exception as e:
-
+            logging.error(f"Rotary encoder error: {e}")
 
     def stop(self) -> None:
         """Stop rotary encoder monitoring"""

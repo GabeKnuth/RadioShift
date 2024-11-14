@@ -39,12 +39,12 @@ class RSSIHandler:
                 return
 
             except Exception as e:
-
+                logging.error(f"Attempt {attempt + 1}: Error reading signal strength: {e}")
                 time.sleep(0.1)
 
         with self.rssi_lock:
             self.current_rssi = 0
-
+        logging.error("Failed to read RSSI after multiple attempts")
 
     def get_rssi(self) -> int:
         """Get the current RSSI value"""

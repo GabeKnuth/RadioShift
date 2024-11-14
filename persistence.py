@@ -21,7 +21,7 @@ class FrequencyPersistence:
         try:
             self.persistence_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-
+            logging.error(f"Failed to create persistence directory: {e}")
 
     def save_frequency(self, frequency: float) -> bool:
         """
@@ -38,7 +38,7 @@ class FrequencyPersistence:
                 f.write(f"{frequency:.1f}")
             return True
         except Exception as e:
-
+            logging.error(f"Failed to save frequency: {e}")
             return False
 
     def load_frequency(self) -> Optional[float]:
@@ -61,5 +61,5 @@ class FrequencyPersistence:
             return None
             
         except (ValueError, IOError) as e:
-
+            logging.error(f"Failed to load frequency: {e}")
             return None

@@ -55,7 +55,7 @@ class Radio:
                 bus.write_i2c_block_data(self.config.TEA5767_ADDRESS, data[0], data[1:])
                 bus.close()
 
-
+            logging.info(f"Frequency set to {freq:.1f} MHz")
 
             # Only stabilize if requested (typically, when rotary encoder has paused)
             if stabilize:
@@ -73,7 +73,7 @@ class Radio:
                 self.display_callback()
 
         except Exception as e:
-
+            logging.error(f"Error setting frequency: {e}")
 
     def adjust_frequency(self, delta: int) -> None:
         """Adjust frequency by delta steps and set stabilization timer with RSSI update"""
