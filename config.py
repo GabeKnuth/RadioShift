@@ -18,6 +18,9 @@ class RadioConfig:
     INPUT_CHANNELS: int = 1
     OUTPUT_CHANNELS: int = 2
 
+    # Persistence Configuration
+    PERSISTENCE_ENABLED: bool = True
+
     # Buffer Configuration
     PAST_BUFFER_SECONDS: int = 60 # Data behind the playback position...allows for rewinding, though, practically speaking, this only needs to be about .5s
     FUTURE_BUFFER_SECONDS: int = 300 # Data in front of the playback position. Max here is 5 mins, but it's really only limited by storage

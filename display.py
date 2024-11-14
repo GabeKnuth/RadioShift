@@ -43,7 +43,7 @@ class Display:
             try:
                 fonts[name] = ImageFont.truetype(self.config.FONT_PATH, size)
             except IOError:
-                logging.warning(f"Failed to load {name} font, using default")
+
                 fonts[name] = ImageFont.load_default()
         return fonts
 
@@ -125,33 +125,47 @@ class Display:
         draw.text((mhz_x, mhz_y + 4), mhz_text, fill="white", font=self.fonts['small'])
 
     def _draw_signal_strength(self, draw, rssi_handler) -> None:
-        """Draw signal strength bars"""
+        """Draw signal strength bars with antenna icon"""
         rssi = rssi_handler.get_rssi()
         bars = rssi_handler.rssi_to_bars(rssi)
         
-        bar_width = 4
-        bar_height_unit = 3
-        spacing = 2
-        x_start = 5
-        y_start = 35
+        # Draw antenna icon (7px wide × 10px high)
+        x_ant = 2
+        y_ant = 3  # Start at top
+        
+        # Draw antenna according to the pixel pattern
+        draw.line([(x_ant, y_ant), (x_ant + 6, y_ant)], fill="white")     # Row 1: Full width
+        draw.point((x_ant + 1, y_ant + 1), fill="white")  # Row 2, left dot
+        draw.point((x_ant + 5, y_ant + 1), fill="white")  # Row 2, right dot
+        draw.point((x_ant + 2, y_ant + 2), fill="white")  # Row 3: left dot
+        draw.point((x_ant + 4, y_ant + 2), fill="white")  # Row 3: right dot
+        draw.point((x_ant + 3, y_ant + 3), fill="white")                  # Row 4
+        draw.point((x_ant + 3, y_ant + 4), fill="white")                  # Row 5
+        draw.point((x_ant + 3, y_ant + 5), fill="white")                  # Row 6
+        draw.point((x_ant + 3, y_ant + 6), fill="white")                  # Row 7
+        draw.point((x_ant + 3, y_ant + 7), fill="white")                  # Row 8
+        draw.point((x_ant + 3, y_ant + 8), fill="white")                  # Row 9
 
-        for i in range(5):
-            bar_height = (i + 1) * bar_height_unit
-            y_pos = y_start + (5 * bar_height_unit) - bar_height
-            if i < bars:
-                draw.rectangle([
-                    x_start + i*(bar_width + spacing),
-                    y_pos,
-                    x_start + i*(bar_width + spacing) + bar_width,
-                    y_start + (5 * bar_height_unit)
-                ], fill="white")
-            else:
-                draw.rectangle([
-                    x_start + i*(bar_width + spacing),
-                    y_pos,
-                    x_start + i*(bar_width + spacing) + bar_width,
-                    y_start + (5 * bar_height_unit)
-                ], outline="white")
+        
+        # Bar configuration
+        bar_width = 2
+        bar_spacing = 1
+        base_height = 2
+        x_start = 11
+        y_bottom = 11
+        
+        # Draw signal strength bars
+        for i in range(bars):
+            bar_height = (i + 1) * base_height
+            y2 = y_bottom
+            y1 = y_bottom - bar_height + 1
+            
+            draw.rectangle([
+                x_start + i * (bar_width + bar_spacing),
+                y1,
+                x_start + i * (bar_width + bar_spacing) + bar_width - 1,
+                y2
+            ], fill="white")
 
     def _draw_playback_status(self, draw, paused: bool) -> None:
         """Draw playback status centered at the bottom of display"""

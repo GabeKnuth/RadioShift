@@ -18,9 +18,34 @@ from display import Display
 from buttons import ButtonHandler, RotaryHandler
 from radio import Radio
 from rssi import RSSIHandler
+from persistence import FrequencyPersistence  # Add at top with other imports
+from smbus2 import SMBus, i2c_msg
 
 class FMRadio:
     def __init__(self):
+        # Wait for I2C bus to be ready
+        max_retries = 10
+        retry_delay = 1
+        
+        for attempt in range(max_retries):
+            try:
+                bus = SMBus(config.I2C_BUS_NUMBER)
+                read = i2c_msg.read(config.TEA5767_ADDRESS, 5)
+                bus.i2c_rdwr(read)
+                status = list(read)
+                rssi = (status[3] >> 4) & 0x0F
+
+                bus.close()
+
+                break
+            except Exception as e:
+
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                else:
+
+                    raise
+        
         # Initialize components
         self.running = True
         self.audio_buffer = TimeShiftBuffer(
@@ -33,17 +58,38 @@ class FMRadio:
         self.display = Display(config)
         self.rssi_handler = RSSIHandler(config)
         
-        # Initialize radio with display callback and rssi_handler
+        # Initialize persistence and get starting frequency
+        self.persistence = FrequencyPersistence(config)
+        starting_frequency = self.persistence.load_frequency() or config.DEFAULT_FREQUENCY
+        
+        # Initialize radio without display callback first
         self.radio = Radio(config, 
-            lambda: self.display.update(
-                self.radio.get_frequency(),
-                self.audio_buffer.playback_paused,
-                self.rssi_handler,
-                self.audio_buffer
-            ),
-            self.rssi_handler  # Pass RSSI handler here
+            None,  # No display callback yet
+            self.rssi_handler,
+            self.persistence
         )
+        
+        # Prime the radio silently
 
+        self.radio.set_frequency(88.1)
+        time.sleep(0.5)
+        
+        # Now set the real frequency
+
+        self.radio.set_frequency(starting_frequency)
+        
+        # Only now set up the display callback
+        self.radio.display_callback = lambda: self.display.update(
+            self.radio.get_frequency(),
+            self.audio_buffer.playback_paused,
+            self.rssi_handler,
+            self.audio_buffer
+        )
+        
+        # Trigger initial display update
+        if self.radio.display_callback:
+            self.radio.display_callback()
+        
         # Set up button callbacks
         self.button_callbacks = {
             'backward': self._on_backward,
@@ -59,7 +105,7 @@ class FMRadio:
     def _audio_callback(self, indata, outdata, frames, time_info, status):
         """Handle audio streaming and playback."""
         if status:
-            logging.warning(f"Audio callback status: {status}")
+
 
         # Write incoming audio to buffer
         self.audio_buffer.write(indata.copy())
@@ -72,60 +118,7 @@ class FMRadio:
             outdata[:] = np.repeat(buffered_data, 2, axis=1)
         else:
             outdata[:] = buffered_data
-            
-    # def _audio_callback(self, indata, outdata, frames, time_info, status):
-    #     """Handle audio streaming and playback prioritization in buffered mode."""
-    #     if status:
-    #         logging.warning(f"Audio callback status: {status}")
-
-    #     # Write incoming audio to buffer
-    #     self.audio_buffer.write(indata.copy())
-
-    #     if not self.audio_buffer.playback_paused:
-    #         # Buffered playback: prioritize past_buffer temporarily after rewind
-    #         if len(self.audio_buffer.past_buffer) > 0:
-    #             buffered_data = self.audio_buffer.read(frames)
-    #             if buffered_data is not None:
-    #                 if config.INPUT_CHANNELS == 1 and config.OUTPUT_CHANNELS == 2:
-    #                     outdata[:] = np.repeat(buffered_data, 2, axis=1)
-    #                 else:
-    #                     outdata[:] = buffered_data
-    #             else:
-    #                 outdata[:] = np.zeros((frames, config.OUTPUT_CHANNELS), dtype='int16')
-    #         else:
-    #             # Standard playback from future buffer if no past buffer frames
-    #             buffered_data = self.audio_buffer.read(frames)
-    #             if buffered_data is not None:
-    #                 if config.INPUT_CHANNELS == 1 and config.OUTPUT_CHANNELS == 2:
-    #                     outdata[:] = np.repeat(buffered_data, 2, axis=1)
-    #                 else:
-    #                     outdata[:] = buffered_data
-    #             else:
-    #                 outdata[:] = np.zeros((frames, config.OUTPUT_CHANNELS), dtype='int16')
-    #     else:
-    #         # Paused playback: output silence
-    #         outdata[:] = np.zeros((frames, config.OUTPUT_CHANNELS), dtype='int16')
-
-
-    # def _audio_callback(self, indata, outdata, frames, time_info, status):
-    #     """Handle audio streaming"""
-    #     if status:
-    #         logging.warning(f"Audio callback status: {status}")
-        
-    #     self.audio_buffer.write(indata.copy())
-
-    #     if not self.audio_buffer.playback_paused:
-    #         buffered_data = self.audio_buffer.read(frames)
-    #         if buffered_data is not None:
-    #             if config.INPUT_CHANNELS == 1 and config.OUTPUT_CHANNELS == 2:
-    #                 outdata[:] = np.repeat(buffered_data, 2, axis=1)
-    #             else:
-    #                 outdata[:] = buffered_data
-    #         else:
-    #             outdata[:] = np.zeros((frames, config.OUTPUT_CHANNELS), dtype='int16')
-    #     else:
-    #         outdata[:] = np.zeros((frames, config.OUTPUT_CHANNELS), dtype='int16')
-
+     
 
     def _on_backward(self):
         """Handle backward button press"""
@@ -134,7 +127,7 @@ class FMRadio:
         # Original rewind logic
         half_second_frames = int(config.SAMPLE_RATE * 0.5)
         self.audio_buffer.move_backward(half_second_frames)
-        logging.info("Moved playback backward by 0.5 seconds")
+
         
         new_position = self.audio_buffer.get_delayed_time()
 
@@ -153,7 +146,7 @@ class FMRadio:
         # Original forward logic
         half_second_frames = int(config.SAMPLE_RATE * 0.5)
         self.audio_buffer.move_forward(half_second_frames)
-        logging.info("Moved playback forward by 0.5 seconds")
+
         
         new_position = self.audio_buffer.get_delayed_time()
 
@@ -177,7 +170,7 @@ class FMRadio:
             self.audio_buffer.resume()
             state = "resumed"
         
-        logging.info(f"Playback {state}")
+
 
         self.display.update(
             self.radio.get_frequency(),
@@ -187,52 +180,10 @@ class FMRadio:
         )
 
 
-    # def _on_backward(self):
-    #     """Handle backward button press"""
-    #     half_second_frames = int(config.SAMPLE_RATE * 0.5)
-    #     self.audio_buffer.move_backward(half_second_frames)
-    #     logging.info("Moved playback backward by 0.5 seconds")
-    #     self.display.update(
-    #         self.radio.get_frequency(),
-    #         self.audio_buffer.playback_paused,
-    #         self.rssi_handler,
-    #         self.audio_buffer,
-    #         message="-0.5s"
-    #     )
-
-    # def _on_forward(self):
-    #     """Handle forward button press"""
-    #     half_second_frames = int(config.SAMPLE_RATE * 0.5)
-    #     self.audio_buffer.move_forward(half_second_frames)
-    #     logging.info("Moved playback forward by 0.5 seconds")
-    #     self.display.update(
-    #         self.radio.get_frequency(),
-    #         self.audio_buffer.playback_paused,
-    #         self.rssi_handler,
-    #         self.audio_buffer,
-    #         message="+0.5s"
-    #     )
-
-    # def _on_play_pause(self):
-    #     """Handle play/pause button press"""
-    #     if not self.audio_buffer.playback_paused:
-    #         self.audio_buffer.pause()
-    #         state = "paused"
-    #     else:
-    #         self.audio_buffer.resume()
-    #         state = "resumed"
-    #     logging.info(f"Playback {state}")
-    #     self.display.update(
-    #         self.radio.get_frequency(),
-    #         self.audio_buffer.playback_paused,
-    #         self.rssi_handler,
-    #         self.audio_buffer
-    #     )
-
     def _on_live(self):
         """Handle live button press"""
         self.audio_buffer.reset_to_live()
-        logging.info("Playback reset to live")
+
         self.display.update(
             self.radio.get_frequency(),
             self.audio_buffer.playback_paused,
@@ -252,7 +203,7 @@ class FMRadio:
         # If we were playing from buffer, reset to live
         if is_buffered:
             self.audio_buffer.reset_to_live()
-            logging.info("Playback reset to live after frequency change")
+
             # Update display with reset message
             self.display.update(
                 self.radio.get_frequency(),
@@ -265,10 +216,8 @@ class FMRadio:
     def run(self) -> NoReturn:
         """Main run loop"""
         try:
-            logging.info("Starting FM Radio")
+
             
-            # Set initial frequency
-            self.radio.set_frequency(config.DEFAULT_FREQUENCY)
             time.sleep(0.5)  # Allow PLL to stabilize
             
             # Initial RSSI read and display update
@@ -303,7 +252,7 @@ class FMRadio:
                 channels=(config.INPUT_CHANNELS, config.OUTPUT_CHANNELS),
                 callback=self._audio_callback
             ):
-                logging.info("Audio streaming started")
+
                 print("FM Radio is running. Press Ctrl+C to exit.")
                 
                 # Main loop with periodic display update for buffer duration while paused
@@ -319,10 +268,10 @@ class FMRadio:
                         )
 
         except KeyboardInterrupt:
-            logging.info("Keyboard interrupt received")
+
             print("\nExiting FM Radio")
         except Exception as e:
-            logging.error(f"Unexpected error: {e}")
+
             print(f"An unexpected error occurred: {e}")
         finally:
             self.cleanup()
@@ -334,13 +283,13 @@ class FMRadio:
         self.rotary_handler.stop()
         self.rssi_handler.stop_monitoring()
         self.display.cleanup()
-        logging.info("FM Radio terminated")
+
 
 if __name__ == "__main__":
     # Set up logging
-    logging.basicConfig(
+
         filename='fm_radio.log',
-        level=logging.DEBUG,
+
         format='%(asctime)s %(levelname)s: %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )

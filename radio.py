@@ -15,13 +15,14 @@ from config import RadioConfig
 from rssi import RSSIHandler
 
 class Radio:
-    def __init__(self, config, display_callback: Callable, rssi_handler: RSSIHandler):
+    def __init__(self, config, display_callback: Callable, rssi_handler: RSSIHandler, persistence_handler=None):
         self.config = config
         self.display_callback = display_callback
-        self.rssi_handler = rssi_handler  # RSSI handler for signal strength updates
+        self.rssi_handler = rssi_handler  
+        self.persistence_handler = persistence_handler
         self.frequency = self.config.DEFAULT_FREQUENCY
         self.i2c_lock = threading.Lock()
-        self.stabilization_timer = None  # Timer for PLL stabilization
+        self.stabilization_timer = None
 
     def set_frequency(self, freq: float, stabilize: bool = False, update_rssi: bool = False) -> None:
         """Set the radio frequency with bounds checking and optional PLL stabilization and RSSI update"""
@@ -54,7 +55,7 @@ class Radio:
                 bus.write_i2c_block_data(self.config.TEA5767_ADDRESS, data[0], data[1:])
                 bus.close()
 
-            logging.info(f"Frequency set to {freq:.1f} MHz")
+
 
             # Only stabilize if requested (typically, when rotary encoder has paused)
             if stabilize:
@@ -63,12 +64,16 @@ class Radio:
                 # Update RSSI if requested
                 if update_rssi and self.config.ENABLE_RSSI:
                     self.rssi_handler.read_signal_strength()
+                    
+                # Save frequency after stabilization if persistence is enabled
+                if self.persistence_handler and self.config.PERSISTENCE_ENABLED:
+                    self.persistence_handler.save_frequency(freq)
 
             if self.display_callback:
                 self.display_callback()
 
         except Exception as e:
-            logging.error(f"Error setting frequency: {e}")
+
 
     def adjust_frequency(self, delta: int) -> None:
         """Adjust frequency by delta steps and set stabilization timer with RSSI update"""
@@ -81,7 +86,13 @@ class Radio:
         self.set_frequency(new_freq, stabilize=False)
 
         # Set stabilization timer to run set_frequency with stabilization and RSSI update after delay
-        self.stabilization_timer = threading.Timer(0.5, self.set_frequency, args=(new_freq, True, True))
+        def stabilized_callback():
+            self.set_frequency(new_freq, stabilize=True, update_rssi=True)
+            # Save frequency after PLL lock
+            if self.persistence_handler and self.config.PERSISTENCE_ENABLED:
+                self.persistence_handler.save_frequency(new_freq)
+        
+        self.stabilization_timer = threading.Timer(0.5, stabilized_callback)
         self.stabilization_timer.start()
 
     def get_frequency(self) -> float:
