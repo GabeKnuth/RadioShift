@@ -2,7 +2,7 @@
 from collections import deque
 import threading
 import numpy as np
-import logging
+
 from typing import Optional, Tuple
 
 class TimeShiftBuffer:
