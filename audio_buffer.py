@@ -89,6 +89,15 @@ class DynamicBuffer:
                 else:
                     break
 
+    def move_forward(self, frames: int) -> None:
+        with self.lock:
+            for _ in range(frames):
+                if self.future_buffer:
+                    self.past_buffer.append(self.future_buffer.popleft())
+                else:
+                    break
+
+
     def is_live(self) -> bool:
         """Check if playback is live (playing in real-time)."""
         # Consider live if future_buffer has negligible frames
