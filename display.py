@@ -148,7 +148,7 @@ class Display:
 
     # def _draw_buffer_time(self, draw, audio_buffer, paused: bool) -> None:
     #     """Draw buffer time"""
-    #     buffer_time = audio_buffer.get_buffer_time()
+    #     buffer_time = audio_buffer.get_delayed_time()
     #     if buffer_time <= 0.1 and not paused:
     #         buffer_text = "LIVE"
     #     else:

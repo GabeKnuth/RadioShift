@@ -13,7 +13,7 @@ import numpy as np
 
 # Local imports (our modules)
 from config import config, RadioConfig
-from audio_buffer import DynamicBuffer
+from audio_buffer import TimeShiftBuffer
 from display import Display
 from buttons import ButtonHandler, RotaryHandler
 from radio import Radio
@@ -23,7 +23,7 @@ class FMRadio:
     def __init__(self):
         # Initialize components
         self.running = True
-        self.audio_buffer = DynamicBuffer(
+        self.audio_buffer = TimeShiftBuffer(
             past_seconds=config.PAST_BUFFER_SECONDS,
             future_seconds=config.FUTURE_BUFFER_SECONDS,
             sample_rate=config.SAMPLE_RATE,
@@ -55,38 +55,56 @@ class FMRadio:
         self.button_handler = ButtonHandler(config, self.button_callbacks)
         self.rotary_handler = RotaryHandler(config, self._on_rotary)
 
+
     def _audio_callback(self, indata, outdata, frames, time_info, status):
-        """Handle audio streaming and playback prioritization in buffered mode."""
+        """Handle audio streaming and playback."""
         if status:
             logging.warning(f"Audio callback status: {status}")
 
         # Write incoming audio to buffer
         self.audio_buffer.write(indata.copy())
 
-        if not self.audio_buffer.playback_paused:
-            # Buffered playback: prioritize past_buffer temporarily after rewind
-            if len(self.audio_buffer.past_buffer) > 0:
-                buffered_data = self.audio_buffer.read(frames)
-                if buffered_data is not None:
-                    if config.INPUT_CHANNELS == 1 and config.OUTPUT_CHANNELS == 2:
-                        outdata[:] = np.repeat(buffered_data, 2, axis=1)
-                    else:
-                        outdata[:] = buffered_data
-                else:
-                    outdata[:] = np.zeros((frames, config.OUTPUT_CHANNELS), dtype='int16')
-            else:
-                # Standard playback from future buffer if no past buffer frames
-                buffered_data = self.audio_buffer.read(frames)
-                if buffered_data is not None:
-                    if config.INPUT_CHANNELS == 1 and config.OUTPUT_CHANNELS == 2:
-                        outdata[:] = np.repeat(buffered_data, 2, axis=1)
-                    else:
-                        outdata[:] = buffered_data
-                else:
-                    outdata[:] = np.zeros((frames, config.OUTPUT_CHANNELS), dtype='int16')
+        # Get buffered data for playback
+        buffered_data = self.audio_buffer.read(frames)
+        
+        # Handle stereo conversion if needed
+        if config.INPUT_CHANNELS == 1 and config.OUTPUT_CHANNELS == 2:
+            outdata[:] = np.repeat(buffered_data, 2, axis=1)
         else:
-            # Paused playback: output silence
-            outdata[:] = np.zeros((frames, config.OUTPUT_CHANNELS), dtype='int16')
+            outdata[:] = buffered_data
+            
+    # def _audio_callback(self, indata, outdata, frames, time_info, status):
+    #     """Handle audio streaming and playback prioritization in buffered mode."""
+    #     if status:
+    #         logging.warning(f"Audio callback status: {status}")
+
+    #     # Write incoming audio to buffer
+    #     self.audio_buffer.write(indata.copy())
+
+    #     if not self.audio_buffer.playback_paused:
+    #         # Buffered playback: prioritize past_buffer temporarily after rewind
+    #         if len(self.audio_buffer.past_buffer) > 0:
+    #             buffered_data = self.audio_buffer.read(frames)
+    #             if buffered_data is not None:
+    #                 if config.INPUT_CHANNELS == 1 and config.OUTPUT_CHANNELS == 2:
+    #                     outdata[:] = np.repeat(buffered_data, 2, axis=1)
+    #                 else:
+    #                     outdata[:] = buffered_data
+    #             else:
+    #                 outdata[:] = np.zeros((frames, config.OUTPUT_CHANNELS), dtype='int16')
+    #         else:
+    #             # Standard playback from future buffer if no past buffer frames
+    #             buffered_data = self.audio_buffer.read(frames)
+    #             if buffered_data is not None:
+    #                 if config.INPUT_CHANNELS == 1 and config.OUTPUT_CHANNELS == 2:
+    #                     outdata[:] = np.repeat(buffered_data, 2, axis=1)
+    #                 else:
+    #                     outdata[:] = buffered_data
+    #             else:
+    #                 outdata[:] = np.zeros((frames, config.OUTPUT_CHANNELS), dtype='int16')
+    #     else:
+    #         # Paused playback: output silence
+    #         outdata[:] = np.zeros((frames, config.OUTPUT_CHANNELS), dtype='int16')
 
 
     # def _audio_callback(self, indata, outdata, frames, time_info, status):
@@ -111,14 +129,14 @@ class FMRadio:
 
     def _on_backward(self):
         """Handle backward button press"""
-        previous_position = self.audio_buffer.get_buffer_time()
+        previous_position = self.audio_buffer.get_delayed_time()
         
         # Original rewind logic
         half_second_frames = int(config.SAMPLE_RATE * 0.5)
         self.audio_buffer.move_backward(half_second_frames)
         logging.info("Moved playback backward by 0.5 seconds")
         
-        new_position = self.audio_buffer.get_buffer_time()
+        new_position = self.audio_buffer.get_delayed_time()
 
         self.display.update(
             self.radio.get_frequency(),
@@ -130,14 +148,14 @@ class FMRadio:
 
     def _on_forward(self):
         """Handle forward button press"""
-        previous_position = self.audio_buffer.get_buffer_time()
+        previous_position = self.audio_buffer.get_delayed_time()
         
         # Original forward logic
         half_second_frames = int(config.SAMPLE_RATE * 0.5)
         self.audio_buffer.move_forward(half_second_frames)
         logging.info("Moved playback forward by 0.5 seconds")
         
-        new_position = self.audio_buffer.get_buffer_time()
+        new_position = self.audio_buffer.get_delayed_time()
 
         self.display.update(
             self.radio.get_frequency(),
@@ -149,7 +167,7 @@ class FMRadio:
 
     def _on_play_pause(self):
         """Handle play/pause button press"""
-        current_position = self.audio_buffer.get_buffer_time()
+        current_position = self.audio_buffer.get_delayed_time()
         
         # Original play/pause toggle logic
         if not self.audio_buffer.playback_paused:
