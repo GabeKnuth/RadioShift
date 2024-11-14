@@ -243,8 +243,24 @@ class FMRadio:
 
     def _on_rotary(self, value):
         """Handle rotary encoder rotation"""
-        if not self.audio_buffer.playback_paused:
-            self.radio.adjust_frequency(value)
+        # Check if we're playing from buffer
+        is_buffered = not self.audio_buffer.is_live()
+        
+        # Adjust frequency regardless of playback state
+        self.radio.adjust_frequency(value)
+        
+        # If we were playing from buffer, reset to live
+        if is_buffered:
+            self.audio_buffer.reset_to_live()
+            logging.info("Playback reset to live after frequency change")
+            # Update display with reset message
+            self.display.update(
+                self.radio.get_frequency(),
+                self.audio_buffer.playback_paused,
+                self.rssi_handler,
+                self.audio_buffer,
+                message="Live Reset"
+            )
 
     def run(self) -> NoReturn:
         """Main run loop"""

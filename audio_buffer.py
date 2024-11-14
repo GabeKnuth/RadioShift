@@ -15,14 +15,14 @@ class TimeShiftBuffer:
         self.write_pos = 0
         self.read_pos = 0
         self.live_delay_frames = int(0.1 * sample_rate)
-        self.stored_frames = 0  # Track actual frames stored
+        self.stored_frames = 0
         
         self.playback_paused = False
-        self.pause_position = None  # Store pause position
+        self.pause_position = None
         self.time_shift = 0
+        self.cumulative_shift = 0  # Track total buffered time
         self.lock = threading.RLock()
         
-        # Store configuration for time calculations
         self.past_frames = int(past_seconds * sample_rate)
         self.future_frames = int(future_seconds * sample_rate)
 
@@ -62,18 +62,13 @@ class TimeShiftBuffer:
             self.read_pos = (read_from + frames) % self.buffer_size
             return output
 
-    def move_backward(self, frames: int) -> None:
+    def reset_to_live(self) -> None:
         with self.lock:
-            available_frames = min(self.stored_frames, self.past_frames)
-            self.time_shift = min(available_frames, self.time_shift + frames)
-            if not self.playback_paused:
-                self.read_pos = (self.write_pos - self.live_delay_frames - self.time_shift) % self.buffer_size
-
-    def move_forward(self, frames: int) -> None:
-        with self.lock:
-            self.time_shift = max(0, self.time_shift - frames)
-            if not self.playback_paused:
-                self.read_pos = (self.write_pos - self.live_delay_frames - self.time_shift) % self.buffer_size
+            self.time_shift = 0
+            self.cumulative_shift = 0  # Reset cumulative time
+            self.playback_paused = False
+            self.pause_position = None
+            self.read_pos = (self.write_pos - self.live_delay_frames) % self.buffer_size
 
     def pause(self) -> None:
         with self.lock:
@@ -86,31 +81,42 @@ class TimeShiftBuffer:
                 self.read_pos = self.pause_position
                 frames_since_pause = (self.write_pos - self.read_pos) % self.buffer_size
                 self.time_shift = frames_since_pause
+                self.cumulative_shift = frames_since_pause  # Update cumulative time
             self.playback_paused = False
             self.pause_position = None
 
-    def reset_to_live(self) -> None:
+    def move_backward(self, frames: int) -> None:
         with self.lock:
-            self.time_shift = 0
-            self.playback_paused = False
-            self.pause_position = None
-            self.read_pos = (self.write_pos - self.live_delay_frames) % self.buffer_size
+            available_frames = min(self.stored_frames, self.past_frames)
+            shift = min(available_frames, self.time_shift + frames)
+            self.time_shift = shift
+            self.cumulative_shift = shift  # Update cumulative time
+            if not self.playback_paused:
+                self.read_pos = (self.write_pos - self.live_delay_frames - self.time_shift) % self.buffer_size
+
+    def move_forward(self, frames: int) -> None:
+        with self.lock:
+            new_shift = max(0, self.time_shift - frames)
+            self.time_shift = new_shift
+            self.cumulative_shift = new_shift  # Update cumulative time
+            if not self.playback_paused:
+                self.read_pos = (self.write_pos - self.live_delay_frames - self.time_shift) % self.buffer_size
 
     def is_live(self) -> bool:
         with self.lock:
             return self.time_shift == 0 and not self.playback_paused
 
-    def get_future_buffer_time(self) -> float:
-        with self.lock:
-            if self.playback_paused:
-                return self.stored_frames / self.sample_rate
-            return (self.stored_frames - self.time_shift) / self.sample_rate
-
     def get_remaining_buffer_time(self) -> float:
+        """Return time between live and playback position"""
         with self.lock:
             if self.playback_paused:
-                return self.time_shift / self.sample_rate
+                return (self.write_pos - self.pause_position) % self.buffer_size / self.sample_rate
             return self.time_shift / self.sample_rate
+
+    def get_future_buffer_time(self) -> float:
+        """Return remaining buffer time after current position"""
+        with self.lock:
+            return (self.stored_frames - self.time_shift) / self.sample_rate
 
     def get_buffer_time(self) -> float:
         with self.lock:
@@ -118,4 +124,4 @@ class TimeShiftBuffer:
 
     def get_delayed_time(self) -> float:
         with self.lock:
-            return self.time_shift / self.sample_rate
+            return self.cumulative_shift / self.sample_rate

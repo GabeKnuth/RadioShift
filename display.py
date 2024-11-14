@@ -135,7 +135,7 @@ class Display:
             buffer_text = "LIVE"
         elif paused:
             # Show future buffer time if playback is paused
-            buffer_text = f"-{audio_buffer.get_future_buffer_time():.1f}s"
+            buffer_text = f"-{audio_buffer.get_remaining_buffer_time():.1f}s"
         else:
             # Show remaining buffer time when playing from buffer
             buffer_text = f"-{audio_buffer.get_remaining_buffer_time():.1f}s"
