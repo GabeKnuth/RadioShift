@@ -6,4 +6,5 @@
 /._radio.py
 /._rssi.py
 /__pycache__
-/fm_radio.log
+/._fm_radio.log
+/._persistence.py
