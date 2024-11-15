@@ -27,6 +27,7 @@ class Display:
         self._last_audio_buffer = None
         
         # Disable GPIO warnings
+        GPIO.setmode(GPIO.BCM)
         GPIO.setwarnings(False)
         
         # Initialize OLED
