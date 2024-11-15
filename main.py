@@ -283,14 +283,24 @@ class FMRadio:
         self.rotary_handler.stop()
         self.rssi_handler.stop_monitoring()
         self.display.cleanup()
+        
+        # Ensure all files are properly closed
+        logging.shutdown()
+        
+        # Force a filesystem sync
+        import subprocess
+        subprocess.run(['sync'], check=False)
+        
         logging.info("FM Radio terminated")
+
 
 if __name__ == "__main__":
     # Set up logging
     logging.basicConfig(
-        filename='fm_radio.log',
+        filename='/var/tmp/fm_radio/fm_radio.log',
+        filemode='w',  # This will overwrite the file
         level=logging.DEBUG,
-        format='%(asctime)s %(levelname)s: %(message)s',
+        format='%(asctime)s %(levelname)s: %(message)s', 
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     
