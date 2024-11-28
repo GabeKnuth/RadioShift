@@ -25,29 +25,20 @@ class Radio:
         self.stabilization_timer = None
 
     def set_frequency(self, freq: float, stabilize: bool = False, update_rssi: bool = False) -> None:
-        """Set the radio frequency with bounds checking and optional PLL stabilization and RSSI update"""
         try:
-            # Bound frequency to valid range
             freq = max(87.5, min(freq, 108.0))
             freq = round(freq * 10) / 10.0
-
-            # Ensure frequency step is valid
-            decimal_part = freq - int(freq)
-            valid_decimals = [0.1, 0.3, 0.5, 0.7, 0.9]
-            if decimal_part not in valid_decimals:
-                decimal_part = min(valid_decimals, key=lambda x: abs(x - decimal_part))
-                freq = int(freq) + decimal_part
-
+            
             self.frequency = freq
             frequency_hz = freq * 1_000_000
             pll = int((4 * (frequency_hz + 225_000)) / 32_768)
 
             data = [
-                (pll >> 8) & 0x3F,
-                pll & 0xFF,
-                0xB0,
-                0x10,
-                0x00
+                (pll >> 8) & 0x3F,  # First byte
+                pll & 0xFF,         # Second byte
+                0xF0,              # Force mono mode + high side injection
+                0x90,              # Maximum sensitivity (-7dBμV)
+                0x40               # US deemphasis
             ]
 
             with self.i2c_lock:
@@ -55,17 +46,12 @@ class Radio:
                 bus.write_i2c_block_data(self.config.TEA5767_ADDRESS, data[0], data[1:])
                 bus.close()
 
-            logging.info(f"Frequency set to {freq:.1f} MHz")
+            logging.info(f"Frequency set to {freq:.1f} MHz (mono)")
 
-            # Only stabilize if requested (typically, when rotary encoder has paused)
             if stabilize:
-                time.sleep(0.5)  # Allow PLL to stabilize
-
-                # Update RSSI if requested
+                time.sleep(0.5)
                 if update_rssi and self.config.ENABLE_RSSI:
                     self.rssi_handler.read_signal_strength()
-                    
-                # Save frequency after stabilization if persistence is enabled
                 if self.persistence_handler and self.config.PERSISTENCE_ENABLED:
                     self.persistence_handler.save_frequency(freq)
 
