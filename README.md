@@ -15,7 +15,7 @@ A Raspberry Pi FM radio with DVR-like time-shifting capabilities that allows you
 
 ## Hardware Requirements
 
-- Raspberry Pi (any model with GPIO pins)
+- Raspberry Pi (any model <= Pi 4. Pi5 is weird with this hardware config.)
 - TEA5767 FM tuner module (I2C interface)
 - OLED display (SPI interface, SSD1306 controller)
 - 4 push buttons
