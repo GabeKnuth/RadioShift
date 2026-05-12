@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-# config.py - Configuration settings for FM radio
-
 from dataclasses import dataclass, field
 from typing import Dict
 
@@ -11,10 +9,12 @@ class RadioConfig:
     I2C_BUS_NUMBER: int = 1
 
     # Audio Configuration
-    INPUT_DEVICE: int = 1
-    OUTPUT_DEVICE: int = 1
+    INPUT_DEVICE_NAME: str = "USB"
+    OUTPUT_DEVICE_NAME: str = "bcm2835"
+    INPUT_DEVICE: int = None
+    OUTPUT_DEVICE: int = None
     SAMPLE_RATE: int = 44100
-    BLOCKSIZE: int = 1024
+    BLOCKSIZE: int = 4096
     INPUT_CHANNELS: int = 1
     OUTPUT_CHANNELS: int = 2
 
@@ -22,9 +22,9 @@ class RadioConfig:
     PERSISTENCE_ENABLED: bool = True
 
     # Buffer Configuration
-    PAST_BUFFER_SECONDS: int = 60 # Data behind the playback position...allows for rewinding, though, practically speaking, this only needs to be about .5s
-    FUTURE_BUFFER_SECONDS: int = 300 # Data in front of the playback position. Max here is 5 mins, but it's really only limited by storage
-    
+    PAST_BUFFER_SECONDS: int = 5
+    FUTURE_BUFFER_SECONDS: int = 60
+
     @property
     def MAX_BUFFER_SECONDS(self) -> int:
         return self.PAST_BUFFER_SECONDS + self.FUTURE_BUFFER_SECONDS
@@ -42,7 +42,7 @@ class RadioConfig:
     DEFAULT_FREQUENCY: float = 99.9
 
     # RSSI Configuration
-    RSSI_READ_INTERVAL: int = 15  # seconds
+    RSSI_READ_INTERVAL: int = 15
     ENABLE_RSSI: bool = True
 
     # Display Configuration
@@ -53,5 +53,18 @@ class RadioConfig:
         'large': 27
     })
 
-# Create default configuration
+    # UI refresh rate
+    DISPLAY_REFRESH_HZ: int = 4
+
+    def resolve_audio_devices(self):
+        import sounddevice as sd
+        devices = sd.query_devices()
+        for i, dev in enumerate(devices):
+            if self.INPUT_DEVICE is None and self.INPUT_DEVICE_NAME.lower() in dev['name'].lower() and dev['max_input_channels'] > 0:
+                self.INPUT_DEVICE = i
+            if self.OUTPUT_DEVICE is None and self.OUTPUT_DEVICE_NAME.lower() in dev['name'].lower() and dev['max_output_channels'] > 0:
+                self.OUTPUT_DEVICE = i
+        if self.INPUT_DEVICE is None or self.OUTPUT_DEVICE is None:
+            raise RuntimeError(f"Could not find audio devices matching input='{self.INPUT_DEVICE_NAME}' output='{self.OUTPUT_DEVICE_NAME}'. Available: {[(i, d['name']) for i, d in enumerate(devices)]}")
+
 config = RadioConfig()

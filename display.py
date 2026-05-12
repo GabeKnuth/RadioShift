@@ -1,44 +1,38 @@
 #!/usr/bin/env python3
-# display.py - OLED display handling
-
-# Standard library imports
 import threading
 import logging
 from typing import Optional, Dict
 
-# Third-party imports
-from PIL import ImageFont
+from PIL import Image, ImageDraw, ImageFont
 from luma.core.interface.serial import spi
 from luma.oled.device import ssd1306
-from luma.core.render import canvas
 import RPi.GPIO as GPIO
 
-# Local imports
 from config import RadioConfig
 
 class Display:
     def __init__(self, config):
         self.config = config
-        self.current_message = None
-        self.message_timer = None
-        self._last_freq = None
-        self._last_paused = None
-        self._last_rssi_handler = None
-        self._last_audio_buffer = None
-        
-        # Disable GPIO warnings
+        self._message = None
+        self._message_timer = None
+        self._dirty = True
+
         GPIO.setmode(GPIO.BCM)
         GPIO.setwarnings(False)
-        
-        # Initialize OLED
+
         serial_interface = spi(device=0, port=0)
         self.oled = ssd1306(serial_interface)
-        
-        # Initialize fonts
         self.fonts = self._initialize_fonts()
 
+        # Snapshot of state for the render loop to read
+        self._freq = config.DEFAULT_FREQUENCY
+        self._paused = False
+        self._rssi = 0
+        self._rssi_bars = 0
+        self._is_live = True
+        self._buffer_offset = 0.0
+
     def _initialize_fonts(self) -> Dict[str, ImageFont.FreeTypeFont]:
-        """Initialize fonts with fallbacks"""
         fonts = {}
         for name, size in self.config.FONT_SIZES.items():
             try:
@@ -48,119 +42,104 @@ class Display:
                 fonts[name] = ImageFont.load_default()
         return fonts
 
-    def clear_message(self) -> None:
-        """Clear temporary message from display and trigger update"""
-        print("Clearing")
-        self.current_message = None
-        # Trigger a display update with the last known state
-        if self._last_freq is not None:
-            self.update(
-                self._last_freq,
-                self._last_paused,
-                self._last_rssi_handler,
-                self._last_audio_buffer
-            )
+    def mark_dirty(self):
+        self._dirty = True
 
-    def update(self, freq: float, paused: bool, rssi_handler=None, audio_buffer=None, message: Optional[str] = None) -> None:
-        """Update OLED display with current status"""
-        # Store the current state
-        self._last_freq = freq
-        self._last_paused = paused
-        self._last_rssi_handler = rssi_handler
-        self._last_audio_buffer = audio_buffer
-        
-        with canvas(self.oled) as draw:
-            # Clear display
-            draw.rectangle(self.oled.bounding_box, outline=0, fill=0)
+    def set_state(self, freq=None, paused=None, rssi_handler=None, audio_buffer=None, message=None):
+        if freq is not None:
+            self._freq = freq
+        if paused is not None:
+            self._paused = paused
+        if rssi_handler is not None:
+            self._rssi = rssi_handler.get_rssi()
+            self._rssi_bars = rssi_handler.rssi_to_bars(self._rssi)
+        if audio_buffer is not None:
+            self._is_live = audio_buffer.is_live()
+            self._buffer_offset = audio_buffer.get_remaining_buffer_time()
+        if message is not None:
+            self._message = message
+            if self._message_timer and self._message_timer.is_alive():
+                self._message_timer.cancel()
+            self._message_timer = threading.Timer(1.0, self._clear_message)
+            self._message_timer.start()
+        self._dirty = True
 
-            # Draw frequency
-            self._draw_frequency(draw, freq)
-            
-            # Draw RSSI if available
-            if rssi_handler and self.config.ENABLE_RSSI:
-                self._draw_signal_strength(draw, rssi_handler)
-            
-            # Draw playback status
-            self._draw_playback_status(draw, paused)
-            
-            # Draw buffer time if available
-            if audio_buffer:
-                self._draw_buffer_time(draw, audio_buffer, paused)
-            
-            # Draw message
-            self._draw_message(draw, message)
+    def _clear_message(self):
+        self._message = None
+        self._dirty = True
+
+    def render_if_dirty(self):
+        if not self._dirty:
+            return
+        self._dirty = False
+        self._render()
+
+    def _render(self):
+        # Build the frame in memory, then push to SPI in one shot
+        img = Image.new('1', (self.oled.width, self.oled.height), 0)
+        draw = ImageDraw.Draw(img)
+
+        self._draw_frequency(draw, self._freq)
+
+        if self.config.ENABLE_RSSI:
+            self._draw_signal_strength(draw, self._rssi_bars)
+
+        self._draw_buffer_indicator(draw)
+
+        if self._message:
+            self._draw_message(draw, self._message)
+        else:
+            self._draw_playback_status(draw, self._paused)
+
+        self.oled.display(img)
 
     def _draw_frequency(self, draw, freq: float) -> None:
-        """Draw frequency display with perfect horizontal and vertical centering"""
-        # Get frequency text dimensions
         freq_text = f"{freq:.1f}"
         bbox_freq = self.fonts['large'].getbbox(freq_text)
         freq_width = bbox_freq[2] - bbox_freq[0]
         freq_height = bbox_freq[3] - bbox_freq[1]
 
-        # Get MHz text dimensions
         mhz_text = "MHz"
         bbox_mhz = self.fonts['small'].getbbox(mhz_text)
         mhz_width = bbox_mhz[2] - bbox_mhz[0]
         mhz_height = bbox_mhz[3] - bbox_mhz[1]
 
-        # Calculate total width and height for centering
-        spacing = 2  # Space between frequency and MHz
+        spacing = 2
         total_width = freq_width + spacing + mhz_width
-        total_height = max(freq_height, mhz_height)
 
-        # Calculate center positions
-        center_x = 128 // 2  # Screen width / 2
-        center_y = 32  # Screen height / 2 (assuming 64 pixel height)
+        center_x = 128 // 2
+        center_y = 32
 
-        # Calculate starting positions for perfect centering
         freq_x = center_x - (total_width // 2)
         mhz_x = freq_x + freq_width + spacing
-
-        # Vertically align both texts to middle
         freq_y = center_y - (freq_height // 2)
         mhz_y = center_y - (mhz_height // 2)
 
-        # Draw the texts
-        draw.text((freq_x, freq_y -5), freq_text, fill="white", font=self.fonts['large'])
+        draw.text((freq_x, freq_y - 5), freq_text, fill="white", font=self.fonts['large'])
         draw.text((mhz_x, mhz_y + 4), mhz_text, fill="white", font=self.fonts['small'])
 
-    def _draw_signal_strength(self, draw, rssi_handler) -> None:
-        """Draw signal strength bars with antenna icon"""
-        rssi = rssi_handler.get_rssi()
-        bars = rssi_handler.rssi_to_bars(rssi)
-        
-        # Draw antenna icon (7px wide × 10px high)
+    def _draw_signal_strength(self, draw, bars: int) -> None:
         x_ant = 2
-        y_ant = 3  # Start at top
-        
-        # Draw antenna according to the pixel pattern
-        draw.line([(x_ant, y_ant), (x_ant + 6, y_ant)], fill="white")     # Row 1: Full width
-        draw.point((x_ant + 1, y_ant + 1), fill="white")  # Row 2, left dot
-        draw.point((x_ant + 5, y_ant + 1), fill="white")  # Row 2, right dot
-        draw.point((x_ant + 2, y_ant + 2), fill="white")  # Row 3: left dot
-        draw.point((x_ant + 4, y_ant + 2), fill="white")  # Row 3: right dot
-        draw.point((x_ant + 3, y_ant + 3), fill="white")                  # Row 4
-        draw.point((x_ant + 3, y_ant + 4), fill="white")                  # Row 5
-        draw.point((x_ant + 3, y_ant + 5), fill="white")                  # Row 6
-        draw.point((x_ant + 3, y_ant + 6), fill="white")                  # Row 7
-        draw.point((x_ant + 3, y_ant + 7), fill="white")                  # Row 8
-        draw.point((x_ant + 3, y_ant + 8), fill="white")                  # Row 9
+        y_ant = 3
 
-        
-        # Bar configuration
+        draw.line([(x_ant, y_ant), (x_ant + 6, y_ant)], fill="white")
+        draw.point((x_ant + 1, y_ant + 1), fill="white")
+        draw.point((x_ant + 5, y_ant + 1), fill="white")
+        draw.point((x_ant + 2, y_ant + 2), fill="white")
+        draw.point((x_ant + 4, y_ant + 2), fill="white")
+        for dy in range(3, 9):
+            draw.point((x_ant + 3, y_ant + dy), fill="white")
+
         bar_width = 2
         bar_spacing = 1
         base_height = 2
         x_start = 11
         y_bottom = 11
-        
-        # Draw signal strength bars
+
         for i in range(bars):
             bar_height = (i + 1) * base_height
             y2 = y_bottom
             y1 = y_bottom - bar_height + 1
-            
             draw.rectangle([
                 x_start + i * (bar_width + bar_spacing),
                 y1,
@@ -169,77 +148,34 @@ class Display:
             ], fill="white")
 
     def _draw_playback_status(self, draw, paused: bool) -> None:
-        """Draw playback status centered at the bottom of display"""
-        if not self.current_message:  # Only draw status if no message is showing
-            status_text = "PAUSED" if paused else "PLAYING"
-            bbox_status = self.fonts['small'].getbbox(status_text)
-            status_width = bbox_status[2] - bbox_status[0]
-            status_height = bbox_status[3] - bbox_status[1]
-            
-            status_x = (128 - status_width) // 2
-            status_y = 64 - status_height - 3
-            
-            draw.text((status_x, status_y), status_text, fill="white", font=self.fonts['small'])
+        status_text = "PAUSED" if paused else "PLAYING"
+        bbox = self.fonts['small'].getbbox(status_text)
+        w = bbox[2] - bbox[0]
+        h = bbox[3] - bbox[1]
+        draw.text(((128 - w) // 2, 64 - h - 3), status_text, fill="white", font=self.fonts['small'])
 
-    def _draw_buffer_time(self, draw, audio_buffer, paused: bool) -> None:
-        """Draw buffer time based on playback state: live, paused, or buffered playback."""
-        
-        if audio_buffer.is_live() and not paused:
-            buffer_text = "LIVE"
-        elif paused:
-            buffer_text = f"-{audio_buffer.get_remaining_buffer_time():.1f}s"
+    def _draw_buffer_indicator(self, draw) -> None:
+        if self._is_live and not self._paused:
+            text = "LIVE"
         else:
-            buffer_text = f"-{audio_buffer.get_remaining_buffer_time():.1f}s"
+            text = f"-{self._buffer_offset:.1f}s"
 
-        bbox_buffer = self.fonts['small'].getbbox(buffer_text)
-        buffer_width = bbox_buffer[2] - bbox_buffer[0]
-        draw.text((128 - buffer_width - 2, 2), buffer_text, fill="white", font=self.fonts['small'])
+        bbox = self.fonts['small'].getbbox(text)
+        w = bbox[2] - bbox[0]
+        draw.text((128 - w - 2, 2), text, fill="white", font=self.fonts['small'])
 
-    def _draw_message(self, draw, message: Optional[str]) -> None:
-        """Draw temporary message with full-width black background over playback status"""
-        if message:
-            self.current_message = message
-            bbox_message = self.fonts['small'].getbbox(message)
-            message_width = bbox_message[2] - bbox_message[0]
-            message_height = bbox_message[3] - bbox_message[1]
-            
-            message_x = (128 - message_width) // 2
-            message_y = 64 - message_height - 3
-            
-            vertical_padding = 2
-            draw.rectangle([
-                0,
-                message_y - vertical_padding,
-                128,
-                message_y + message_height + vertical_padding
-            ], fill="black", outline="black")
-            
-            draw.text((message_x, message_y), message, fill="white", font=self.fonts['small'])
-            
-            if self.message_timer and self.message_timer.is_alive():
-                self.message_timer.cancel()
-            self.message_timer = threading.Timer(1.0, self.clear_message)
-            self.message_timer.start()
-        
-        elif self.current_message:
-            bbox_message = self.fonts['small'].getbbox(self.current_message)
-            message_width = bbox_message[2] - bbox_message[0]
-            message_height = bbox_message[3] - bbox_message[1]
-            
-            message_x = (128 - message_width) // 2
-            message_y = 64 - message_height - 3
-            
-            vertical_padding = 2
-            draw.rectangle([
-                0,
-                message_y - vertical_padding,
-                128,
-                message_y + message_height + vertical_padding
-            ], fill="black", outline="black")
-            
-            draw.text((message_x, message_y), self.current_message, fill="white", font=self.fonts['small'])
+    def _draw_message(self, draw, message: str) -> None:
+        bbox = self.fonts['small'].getbbox(message)
+        w = bbox[2] - bbox[0]
+        h = bbox[3] - bbox[1]
+        msg_x = (128 - w) // 2
+        msg_y = 64 - h - 3
+
+        draw.rectangle([0, msg_y - 2, 128, msg_y + h + 2], fill="black")
+        draw.text((msg_x, msg_y), message, fill="white", font=self.fonts['small'])
 
     def cleanup(self) -> None:
-        """Clean up display resources"""
+        if self._message_timer and self._message_timer.is_alive():
+            self._message_timer.cancel()
         self.oled.clear()
         self.oled.show()
