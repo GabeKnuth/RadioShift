@@ -9,10 +9,8 @@ class RadioConfig:
     I2C_BUS_NUMBER: int = 1
 
     # Audio Configuration
-    INPUT_DEVICE_NAME: str = "USB"
-    OUTPUT_DEVICE_NAME: str = "bcm2835"
-    INPUT_DEVICE: int = None
-    OUTPUT_DEVICE: int = None
+    INPUT_DEVICE: int = 1
+    OUTPUT_DEVICE: int = 1
     SAMPLE_RATE: int = 44100
     BLOCKSIZE: int = 4096
     INPUT_CHANNELS: int = 1
@@ -56,15 +54,5 @@ class RadioConfig:
     # UI refresh rate
     DISPLAY_REFRESH_HZ: int = 4
 
-    def resolve_audio_devices(self):
-        import sounddevice as sd
-        devices = sd.query_devices()
-        for i, dev in enumerate(devices):
-            if self.INPUT_DEVICE is None and self.INPUT_DEVICE_NAME.lower() in dev['name'].lower() and dev['max_input_channels'] > 0:
-                self.INPUT_DEVICE = i
-            if self.OUTPUT_DEVICE is None and self.OUTPUT_DEVICE_NAME.lower() in dev['name'].lower() and dev['max_output_channels'] > 0:
-                self.OUTPUT_DEVICE = i
-        if self.INPUT_DEVICE is None or self.OUTPUT_DEVICE is None:
-            raise RuntimeError(f"Could not find audio devices matching input='{self.INPUT_DEVICE_NAME}' output='{self.OUTPUT_DEVICE_NAME}'. Available: {[(i, d['name']) for i, d in enumerate(devices)]}")
 
 config = RadioConfig()

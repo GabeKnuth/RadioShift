@@ -20,10 +20,9 @@ class FMRadio:
     def __init__(self):
         self._xrun_flag = False
 
-        self._wait_for_i2c()
-
-        config.resolve_audio_devices()
-        logging.info(f"Resolved audio devices: input={config.INPUT_DEVICE}, output={config.OUTPUT_DEVICE}")
+        # Single shared I2C bus and lock for all components
+        self.i2c_bus = self._wait_for_i2c()
+        self.i2c_lock = threading.Lock()
 
         self.running = True
         self.audio_buffer = TimeShiftBuffer(
@@ -34,10 +33,10 @@ class FMRadio:
         )
 
         self.display = Display(config)
-        self.rssi_handler = RSSIHandler(config)
+        self.rssi_handler = RSSIHandler(config, self.i2c_bus, self.i2c_lock)
         self.persistence = FrequencyPersistence(config)
 
-        self.radio = Radio(config, self.rssi_handler, self.persistence)
+        self.radio = Radio(config, self.i2c_bus, self.i2c_lock, self.rssi_handler, self.persistence)
         self.radio.on_frequency_changed = self._on_state_changed
 
         # Prime the tuner
@@ -58,15 +57,14 @@ class FMRadio:
         self.button_handler = ButtonHandler(config, self.button_callbacks)
         self.rotary_handler = RotaryHandler(config, self._on_rotary)
 
-    def _wait_for_i2c(self):
+    def _wait_for_i2c(self) -> SMBus:
         for attempt in range(10):
             try:
                 bus = SMBus(config.I2C_BUS_NUMBER)
                 read = i2c_msg.read(config.TEA5767_ADDRESS, 5)
                 bus.i2c_rdwr(read)
-                bus.close()
                 logging.info("I2C bus is ready")
-                return
+                return bus
             except Exception as e:
                 logging.warning(f"I2C not ready on attempt {attempt + 1}: {e}")
                 if attempt < 9:
@@ -140,13 +138,11 @@ class FMRadio:
                 self.rssi_handler.read_signal_strength()
             self._push_display_state()
 
-            # Start input threads
             self.button_handler.start_polling()
             self.rotary_handler.start()
             if config.ENABLE_RSSI:
                 self.rssi_handler.start_monitoring()
 
-            # Start audio
             with sd.Stream(
                 device=(config.INPUT_DEVICE, config.OUTPUT_DEVICE),
                 samplerate=config.SAMPLE_RATE,
@@ -160,12 +156,10 @@ class FMRadio:
 
                 refresh_interval = 1.0 / config.DISPLAY_REFRESH_HZ
                 while self.running:
-                    # Drain XRUN flag outside the audio callback
                     if self._xrun_flag:
                         self._xrun_flag = False
                         logging.warning("Audio XRUN detected")
 
-                    # Push fresh state to display at the configured rate
                     self._push_display_state()
                     self.display.render_if_dirty()
 
@@ -185,9 +179,13 @@ class FMRadio:
         self.button_handler.cleanup()
         self.rotary_handler.stop()
         self.rssi_handler.stop_monitoring()
-        self.radio.cleanup()
         self.display.cleanup()
         logging.shutdown()
+
+        try:
+            self.i2c_bus.close()
+        except Exception:
+            pass
 
         import subprocess
         subprocess.run(['sync'], check=False)
